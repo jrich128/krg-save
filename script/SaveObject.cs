@@ -80,19 +80,19 @@ struct SaveObject
 			byteOffset += propByteSize;
 		}
 
-		for(int i = 0; i < Properties.Length; i++)
+		for(int i = 0; i < Fields.Length; i++)
 		{
-			var prop = Properties[i];
-			var propByteSize = Marshal.SizeOf(prop.PropertyType);
+			var field = Fields[i];
+			var fieldByteSize = Marshal.SizeOf(field.FieldType);
 			
-			dynamic value = prop.GetValue(Obj);  
+			dynamic value = field.GetValue(Obj);  
 			byte[] bytes =  BitConverter.GetBytes(value);
 			for(int j = 0; j < bytes.Length; j++)
 			{
 				buff[byteOffset + j] = bytes[j];
 			}	 
 
-			byteOffset += propByteSize;
+			byteOffset += fieldByteSize;
 		}
 
 		return buff;
