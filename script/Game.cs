@@ -1,10 +1,11 @@
 using Godot;
 using System;
-using System.Collections.Generic;
 using System.Data;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.CompilerServices;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+
 
 
 public enum GameStatus
@@ -21,10 +22,11 @@ public struct SaveHeader
 	static int _screencapX = 480; // 1920x1080 / 4
     static int _screencapY = 270;
 
-	Image _screencap;
+	public int HeaderEndByte;
 	public double _unixTime;
-
 	public string MapName; // TODO: Unused right now 
+
+	public Image _screencap;
 
 
 	public SaveHeader(Image image)
@@ -35,6 +37,7 @@ public struct SaveHeader
 		_screencap.Compress(Image.CompressMode.S3Tc, Image.CompressSource.Generic);
 		_unixTime = Time.GetUnixTimeFromSystem();
 		MapName = "";
+		HeaderEndByte = 0;
 	}
 
 	public ImageTexture ScreencapTexture()
@@ -46,16 +49,16 @@ public struct SaveHeader
 
 	public void Write(FileAccess file)
 	{
-		file.StoreVar(MapName);
-		file.StoreVar(_screencap, true);
+		file.Store32(55);
 		file.StoreVar(_unixTime);
+		file.StoreVar(_screencap, true);
 	}
 
 	public void Read(FileAccess file)
 	{
-		MapName    = (string)file.GetVar();
-		_screencap = (Image)file.GetVar(true);
+		file.Get32();
 		_unixTime  = (double)file.GetVar();
+		_screencap = (Image)file.GetVar(true);
 	}
 
 	public string TimeFormated()
@@ -72,8 +75,90 @@ public struct SaveHeader
 }
 
 
+struct SaveObject
+{
+	public object Obj;
+
+	public FieldInfo[] Fields;
+	public PropertyInfo[] Properties;
+	public int ByteSize;
+
+
+    public static SaveObject? MakeFrom(object obj)
+	{
+		Type objType = obj.GetType();
+
+		// Is object marked with [Save]?
+		var attribs = Attribute.GetCustomAttributes(objType);
+		bool hasSaveAttrib = attribs.Any(attrib => attrib.GetType() == typeof(SaveAttribute));
+		if(!hasSaveAttrib){
+			return null;
+		}
+
+		// Get properties marked with [Save]
+		var properties = objType.GetRuntimeProperties();
+		properties = properties.Where(prop => prop.CustomAttributes.Any(attrib => attrib.AttributeType == typeof(SaveAttribute)));
+
+		// Get fields marked with [Save]
+		var fields = objType.GetRuntimeFields();
+		fields = fields.Where(field => field.CustomAttributes.Any(attrib => attrib.AttributeType == typeof(SaveAttribute)));
+
+		// Discard if no [Save] members
+		if(properties.Count() + fields.Count() <= 0){
+			GD.Print($"\n{objType}: Marked with [Save] has no [Save] members. Discarding SaveObject");
+			return null;
+		}
+
+		// Calc sum byte size of all [Save] members
+		int byteSize = 0;
+		properties.All(prop => {byteSize += Marshal.SizeOf(prop.PropertyType); return true;});
+		fields.All(field    => {byteSize += Marshal.SizeOf(field.FieldType  ); return true;});
+
+		// Debug print
+		GD.Print($"\n{objType}");
+		properties.All(prop => {GD.Print(prop.Name ); return true;});
+		fields.All(field =>    {GD.Print(field.Name); return true;});
+		
+	
+		return new SaveObject()
+		{
+			Obj        = obj,
+			Properties = properties.ToArray(),
+			Fields     = fields.ToArray(),
+			ByteSize   = byteSize
+		};
+	}
+
+	public byte[] Data()
+	{
+		int byteOffset = 0;   
+		byte[] buff = new byte[ByteSize];
+
+		for(int i = 0; i < Properties.Length; i++)
+		{
+			var prop = Properties[i];
+			var propByteSize = Marshal.SizeOf(prop.PropertyType);
+			
+			dynamic value = prop.GetValue(Obj);  
+			byte[] bytes =  BitConverter.GetBytes(value);
+			for(int j = 0; j < bytes.Length; j++)
+			{
+				buff[byteOffset + j] = bytes[j];
+			}	 
+
+			byteOffset += propByteSize;
+		}
+
+		return buff;
+	}
+}
+
+
 public partial class Game : Node
 {	
+	[Signal] public delegate void SaveLoadedEventHandler(string saveName);
+	[Signal] public delegate void SaveMadeEventHandler(string saveName);
+
 	static Type _saveAttrib = typeof(SaveAttribute);
 	static string _saveDir = "save"; 
 	static string _saveExt = "krg"; 
@@ -85,6 +170,10 @@ public partial class Game : Node
 	Node map;
 
 	public GameStatus Status = GameStatus.Unloaded;
+
+	// Write this to header?
+	List<SaveObject> _saveList = new List<SaveObject>();
+	int _saveSize;
 
 	
 	static Game()
@@ -101,166 +190,113 @@ public partial class Game : Node
 
 	public override void _Ready()
 	{	
-		PrintAllNodes(this);
+		CreateSaveObjects(this, this);
+		/*GD.Print("\nSave Nodes:______");
+		foreach(var n in _saveList)
+		{
+			GD.Print(n.Name);
+		}*/
+		
+		/*
+		GD.Print("\nBefore: ");
+		GD.Print(((Player)_saveList[0]).findMeBaby);
+
+		object obj = _saveList[0];
+		((Player)obj).findMeBaby = 88;
+
+		GD.Print("After: ");
+		GD.Print(((Player)_saveList[0]).findMeBaby);
+		var fuck = this;
+		switch(fuck)
+		{
+			case Node node:
+			
+			break;
+		}*/
 	}
 
 	public void MakeSave(string name)
 	{
-		static void SaveFieldsAndProps(Node node, Type type, FileAccess file)
-		{
-			// Are any of node's properties marked with [Save]?
-			var props  = type.GetRuntimeProperties();
-			foreach(var prop in props)
-			{
-				// Is field marked with "[Save]" ?
-				bool propHasSaveAttrib = prop.CustomAttributes.Any(attrib => attrib.AttributeType == _saveAttrib);
-				if(!propHasSaveAttrib){
-					continue;
-				}
-				// Is field of type "Variant"?
-				if(prop.PropertyType != typeof(Variant)){
-					GD.PrintErr($"Can only save type 'Variant'");
-					continue;
-				}
-
-				Variant value = (Variant)prop.GetValue(node);
-				file.StoreVar(value);
-			}
-
-			// Are any of node's fields marked with [Save]?
-			var fields = type.GetRuntimeFields();
-			foreach(var field in fields)
-			{
-				// Is field marked with "[Save]" ?
-				bool fieldHasSaveAttrib = field.CustomAttributes.Any(attrib => attrib.AttributeType == _saveAttrib);
-				if(!fieldHasSaveAttrib){
-					continue;
-				}
-				// Is field of type "Variant"?
-				if(field.FieldType != typeof(Variant)){
-					GD.Print($"Can only save type 'Variant'");
-					continue;
-				}
-
-				Variant value = (Variant)field.GetValue(node);
-				file.StoreVar(value);
-			}
-		}
-
-		// Recursivly loop through all nodes in Game & write their [save] data 
-		static void Write(Node node, FileAccess file)
-		{
-			Type type = node.GetType();
-			
-			// Does node's Class have [Save]? 
-			var attribs = Attribute.GetCustomAttributes(type);
-			bool hasSaveAttrib = attribs.Any(attrib => attrib.GetType() == _saveAttrib);
-			if(hasSaveAttrib){
-				SaveFieldsAndProps(node, type, file);
-				GD.Print($"Node:{node.Name} saved.");
-			}
-
-			var children = node.GetChildren();
-			if(children.Count == 0){
-				return;
-			}
-			foreach(var child in children){
-				Write(child, file);
-			}
-		}
-
 		string savePath = SavePath(name);
 
+		int byteOffset = 0;
 		using(var file = FileAccess.Open(savePath, FileAccess.ModeFlags.Write))
 		{
 			CacheScreencap();
 			SaveHeader header = new SaveHeader(_cachedScreenshot.GetImage());
 			
+			// Write header, then use file pos to get size of header & write it back to the begining of the file.
 			header.Write(file);
-			Write(this, file);
+			byteOffset = (int)file.GetPosition(); // This is some hacky shit. I blame C#. Why is it so difficult to get the size of something? YOU CLEARY KNOW IT C# JUST TELL ME -_-
+			file.Seek(0);
+			file.Store32((uint)byteOffset);
+			file.Seek((ulong)byteOffset);
+
+			for(int i = 0; i < _saveList.Count; i++)
+			{
+				file.StoreBuffer(_saveList[i].Data());	
+				byteOffset += _saveList[i].ByteSize;
+			}
 		}
+
+		GD.Print("Saved.");
 	}
 
 	public Error LoadSave(string name)
 	{	
-		static void LoadFieldsAndProps(Node node, Type type, FileAccess file)
-		{
-			// Are any of node's properties marked with [Save]?
-			var props  = type.GetRuntimeProperties();
-			foreach(var prop in props)
-			{
-				// Is field marked with "[Save]" ?
-				bool propHasSaveAttrib = prop.CustomAttributes.Any(attrib => attrib.AttributeType == _saveAttrib);
-				if(!propHasSaveAttrib){
-					continue;
-				}
-				// Is field of type "Variant"?
-				if(prop.PropertyType != typeof(Variant)){
-					GD.Print($"Can only save type 'Variant'");
-					continue;
-				}
-
-				Variant value = file.GetVar();
-				prop.SetValue(node, value);
-			}
-
-			// Are any of node's fields marked with [Save]?
-			var fields = type.GetRuntimeFields();
-			foreach(var field in fields)
-			{
-				// Is field marked with "[Save]" ?
-				bool fieldHasSaveAttrib = field.CustomAttributes.Any(attrib => attrib.AttributeType == _saveAttrib);
-				if(!fieldHasSaveAttrib){
-					continue;
-				}
-				// Is field of type "Variant"?
-				if(field.FieldType != typeof(Variant)){
-					GD.Print($"Can only save type 'Variant'");
-					continue;
-				}
-
-				Variant value = file.GetVar();
-				field.SetValue(node, value);
-			}
-		}
-
-		// Recursivly loop through all nodes in Game & read their [save] data 
-		static void Read(Node node, FileAccess file)
-		{
-			Type type = node.GetType();
-			
-			// Does node's Class have [Save]? 
-			var attribs = Attribute.GetCustomAttributes(type);
-			bool hasSaveAttrib = attribs.Any(attrib => attrib.GetType() == _saveAttrib);
-			if(hasSaveAttrib){
-				LoadFieldsAndProps(node, type, file);
-				GD.Print($"Node:{node.Name} loaded.");
-			}
-
-			var children = node.GetChildren();
-			if(children.Count == 0){
-				return;
-			}
-			foreach(var child in children){
-				Read(child, file);
-			}
-		}
-
 		string savePath = SavePath(name);
 		if(!FileAccess.FileExists(savePath)){
 			return Error.FileNotFound;
 		}
 
-		SaveHeader header = new SaveHeader();
-		using(var file = FileAccess.Open(savePath, FileAccess.ModeFlags.Read))
-		{
-			header.Read(file);
-			Read(this, file);
+		// Load file as raw bytes
+		byte[] file = FileAccess.GetFileAsBytes(savePath);
+		if(file.Length == 0 || file == null){
+			return FileAccess.GetOpenError();
 		}
 
-		GetNode<TextureRect>("img").Texture = header.ScreencapTexture();
+		// Load Header data
+		int byteOffset = BitConverter.ToInt32(file, 0);
 
-		Status = GameStatus.Loaded;
+		for(int i = 0; i < _saveList.Count; i++)
+		{
+			for(int j = 0; j < _saveList[i].Properties.Length; j++)
+			{
+				// Get value from obj inst to use for pattern matching switch. <rant> My hand is forced. Why the hell can't we just switch on types??? </rant>
+				var obj  = _saveList[i].Obj;
+				var prop = _saveList[i].Properties[j];
+				var value = prop.GetValue(_saveList[i].Obj);
+				
+				switch(value)
+				{
+					case Variant:
+					//prop.SetValue(obj, v);
+					GD.Print("Used a variant... is this okay?");
+					break;
+
+					case int:
+					int v = BitConverter.ToInt32(file, byteOffset);
+					prop.SetValue(obj, v);
+					byteOffset += 4;
+					break;
+
+					case float:
+					break;
+
+					case double:
+					break;
+
+					default:
+					GD.PrintErr($"Property type not supported: {prop.PropertyType}");
+					break;
+				}
+			}
+		}
+
+		//GetNode<TextureRect>("img").Texture = header.ScreencapTexture();
+		GD.Print("Loaded.");
+		Status = GameStatus.Loaded;//??
+		EmitSignal(SignalName.SaveLoaded);
 		return Error.Ok;
 	}
 
@@ -274,10 +310,20 @@ public partial class Game : Node
 			return null;
 		}
 
-		SaveHeader header = new SaveHeader();
+		SaveHeader header;
 		using(var file = FileAccess.Open(savePath, FileAccess.ModeFlags.Read))
 		{
-			header.Read(file);
+			GD.Print();
+			file.Get32();
+			file.GetVar();
+			var image = file.GetVar(true);
+
+			header = new SaveHeader()
+			{
+				_screencap = (Image)image,
+
+			};
+			//header.Read(file);
 		}
 
 		return header;
@@ -291,10 +337,17 @@ public partial class Game : Node
 		_cachedScreenshot = GetViewport().GetTexture();
 	}
 
-	static void PrintAllNodes(Node node)
+	/// <summary>
+	/// Recursive loop all Game's nodes & find any [Save] classes. Create SaveObjects from them 
+	/// </summary>
+	static void CreateSaveObjects(Game game, Node node)
 	{
-		if(node.Owner != null){
-			GD.Print(node.Owner.Name);
+		SaveObject? saveObj = SaveObject.MakeFrom(node);
+		if(saveObj.HasValue){
+			game._saveList.Add(saveObj.Value);
+			game._saveSize += saveObj.Value.ByteSize;
+
+			GD.Print($"Node:{node.Name} saved.");
 		}
 
 		var children = node.GetChildren();
@@ -302,7 +355,7 @@ public partial class Game : Node
 			return;
 		}
 		foreach(var child in children){
-			PrintAllNodes(child);	
+			CreateSaveObjects(game, child);	
 		}
 	}
 }

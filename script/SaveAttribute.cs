@@ -7,11 +7,7 @@ using System;
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Field | AttributeTargets.Property)]
 public class SaveAttribute : Attribute
 {
-	// TODO:
-	//public Type VarType
-
 	public SaveAttribute()
 	{
-		//GetType()
 	}
 }
