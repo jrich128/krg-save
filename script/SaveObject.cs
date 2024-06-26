@@ -9,7 +9,7 @@ using System.Runtime.InteropServices;
 struct SaveObject
 {
 	public object Obj;
-
+	
 	public FieldInfo[] Fields;
 	public PropertyInfo[] Properties;
 	public int ByteSize;
@@ -46,10 +46,9 @@ struct SaveObject
 		fields.All(field    => {byteSize += Marshal.SizeOf(field.FieldType  ); return true;});
 
 		// Debug print
-		GD.Print($"\n{objType}");
-		properties.All(prop => {GD.Print(prop.Name ); return true;});
-		fields.All(field =>    {GD.Print(field.Name); return true;});
-		
+		//GD.Print($"\n{objType}");
+		//properties.All(prop => {GD.Print(prop.Name ); return true;});
+		//fields.All(field =>    {GD.Print(field.Name); return true;});
 	
 		return new SaveObject()
 		{
