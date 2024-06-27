@@ -27,7 +27,11 @@ public partial class Game : Node
 	static string _saveExt = "krg"; 
 	static string SavePath(string name) => $"{_saveDir}/{name}.{_saveExt}";
 
-	Texture2D _cachedScreenshot;
+	public Texture2D CachedScreenshot;
+	public void CaptureCachedSreenshot()
+	{
+		CachedScreenshot = GetViewport().GetTexture();
+	}
 
 	public GameStatus Status = GameStatus.Unloaded;
 
@@ -39,7 +43,7 @@ public partial class Game : Node
 	{	
 		// Check for save dir, make if none
 		if(!DirAccess.DirExistsAbsolute(_saveDir)){
-			var err = Godot.DirAccess.MakeDirAbsolute(_saveDir);
+			var err = DirAccess.MakeDirAbsolute(_saveDir);
 			if(err != Error.Ok){
 				GD.PrintErr($"Failed making save dir: '{err}'");
 				return;
@@ -56,8 +60,8 @@ public partial class Game : Node
 		int byteOffset = 0;
 		using(var file = FileAccess.Open(savePath, FileAccess.ModeFlags.Write))
 		{
-			CacheScreencap();
-			SaveHeader header = new SaveHeader(_cachedScreenshot.GetImage());
+			CaptureCachedSreenshot();
+			SaveHeader header = new SaveHeader(CachedScreenshot.GetImage());
 			
 			// Write header, then use file pos to get size of header & write it back to the begining of the file.
 			header.Write(file);
@@ -119,16 +123,56 @@ public partial class Game : Node
 					byteOffset += sizeof(double);
 					break;
 
-
+					case bool:		
+					GD.Print("bool");		
+					prop.SetValue(obj, BitConverter.ToBoolean(file, byteOffset));
+					byteOffset += sizeof(bool);
+					break;
 
 					default:
 					GD.PrintErr($"Property type not supported: {prop.PropertyType}");
 					break;
 				}
 			}
+
+			for(int j = 0; j < _saveList[i].Fields.Length; j++)
+			{
+				// Get value from obj inst to use for pattern matching switch. <rant> My hand is forced. Why the hell can't we just switch on types??? </rant>
+				var obj  = _saveList[i].Obj;
+				var field = _saveList[i].Fields[j];
+				var value = field.GetValue(_saveList[i].Obj);
+		
+
+				switch(value)
+				{
+					case int:
+					field.SetValue(obj, BitConverter.ToInt32(file, byteOffset));
+					byteOffset += sizeof(int);
+					break;
+
+					case float:
+					field.SetValue(obj, BitConverter.ToSingle(file, byteOffset));
+					byteOffset += sizeof(float);
+					break;
+
+					case double:				
+					field.SetValue(obj, BitConverter.ToDouble(file, byteOffset));
+					byteOffset += sizeof(double);
+					break;
+
+					case bool:		
+					GD.Print("bool");		
+					field.SetValue(obj, BitConverter.ToBoolean(file, byteOffset));
+					byteOffset += sizeof(bool);
+					break;
+
+					default:
+					GD.PrintErr($"Field type not supported: {field.FieldType}");
+					break;
+				}
+			}
 		}
 
-		//GetNode<TextureRect>("img").Texture = header.ScreencapTexture();
 		GD.Print("Loaded.");
 		Status = GameStatus.Loaded;//??
 		EmitSignal(SignalName.SaveLoaded);
@@ -155,14 +199,6 @@ public partial class Game : Node
 	}
 
 	/// <summary>
-	/// Save screenshot when screen is clear of menus & whatnot 
-	/// </summary>
-	void CacheScreencap()
-	{
-		_cachedScreenshot = GetViewport().GetTexture();
-	}
-
-	/// <summary>
 	/// Recursive loop all Game's nodes & find any [Save] classes. Create SaveObjects from them 
 	/// </summary>
 	static void CreateSaveObjects(Game game, Node node)
@@ -171,8 +207,7 @@ public partial class Game : Node
 		if(saveObj.HasValue){
 			game._saveList.Add(saveObj.Value);
 			game._saveSize += saveObj.Value.ByteSize;
-
-			GD.Print($"Node:{node.Name} saved.");
+			//GD.Print($"Node:{node.Name} saved.");
 		}
 
 		var children = node.GetChildren();
@@ -183,6 +218,4 @@ public partial class Game : Node
 			CreateSaveObjects(game, child);	
 		}
 	}
-
-	
 }
