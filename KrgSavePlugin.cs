@@ -5,46 +5,41 @@ using System;
 [Tool]
 public partial class KrgSavePlugin : EditorPlugin
 {
-	static string Dir          = "addons/krg-save";
-	static string GameScript   = "script/Game.cs";
-	static string TerminalIcon = "icon.png";
-	static string Path(string fileName) => $"{Dir}/{fileName}";
-	
-	static string TypeName = "Game";
-	static string FailText = "Plugin 'krg-save' failed to load.";
+	static string PluginName = "krg-save";
+    public override string _GetPluginName() => PluginName;
 
+	static string Dir = $"addons/{PluginName}";
+	
 
 	public override void _EnterTree()
 	{
-		// Find plugin directory
+		// Check for plugin directory
 		if(!DirAccess.DirExistsAbsolute(Dir)){
-			GD.PrintErr($"{FailText}\nDirectory not found '{Dir}'");
+			GD.PrintErr($"{PluginName}: Directory not found '{Dir}'");
 			return;
         }
 
-		// Find icon
-		string iconPath = Path(TerminalIcon);
+		string scriptPath = $"{Dir}/script/Game.cs";
+		if(!FileAccess.FileExists(scriptPath)){
+			GD.PrintErr($"{PluginName}: File not found '{scriptPath}'");
+			return;
+		}
+
+		string iconPath = $"{Dir}/icon.png";
 		if(!FileAccess.FileExists(iconPath)){
-			GD.PrintErr($"{FailText}\nFile not found '{iconPath}'");
+			GD.PrintErr($"{PluginName}: File not found '{iconPath}'");
 			return;
 		}
-
-		// Find script
-		string scriptPath = Path(GameScript);
-		if(!Godot.FileAccess.FileExists(scriptPath)){
-			GD.PrintErr($"{FailText}\nFile not found '{scriptPath}'");
-			return;
-		}
-
+		
 		var icon   = ResourceLoader.Load<Texture2D>(iconPath);
 		var script = ResourceLoader.Load<Script>(scriptPath);
 		
-		AddCustomType(TypeName, "Node", script, icon);
+		AddCustomType("Game", "Node", script, icon);
 	}
 
 	public override void _ExitTree()
 	{
-		RemoveCustomType(TypeName);
+		RemoveCustomType("Game");
 	}
 }
 #endif

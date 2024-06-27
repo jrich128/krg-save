@@ -1,5 +1,6 @@
 using Godot;
 using System;
+using System.ComponentModel.DataAnnotations;
 
 /// <summary>
 /// Used to tag Classes & their Fields for Saving
@@ -9,5 +10,5 @@ public class SaveAttribute : Attribute
 {
 	public SaveAttribute()
 	{
-	}
+	}	
 }

@@ -4,6 +4,7 @@ using System.Linq;
 using System.Data;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Collections.Generic;
 
 
 struct SaveObject
@@ -25,7 +26,7 @@ struct SaveObject
 		if(!hasSaveAttrib){
 			return null;
 		}
-
+		
 		// Get properties marked with [Save]
 		var properties = objType.GetRuntimeProperties();
 		properties = properties.Where(prop => prop.CustomAttributes.Any(attrib => attrib.AttributeType == typeof(SaveAttribute)));
@@ -34,11 +35,28 @@ struct SaveObject
 		var fields = objType.GetRuntimeFields();
 		fields = fields.Where(field => field.CustomAttributes.Any(attrib => attrib.AttributeType == typeof(SaveAttribute)));
 
-		// Discard if no [Save] members
+
+		// Return if no [Save] members
 		if(properties.Count() + fields.Count() <= 0){
 			GD.Print($"\n{objType}: Marked with [Save] has no [Save] members. Discarding SaveObject");
 			return null;
 		}
+
+		// Check for incompatible data types
+		var incompProps  = properties.Where(field => !field.PropertyType.IsSerializable);
+		var incompFields = fields.Where(p => !p.FieldType.IsSerializable);
+		if(incompFields.Count() + incompProps.Count() > 0)
+		{
+			foreach(var p in incompProps){
+				GD.PrintErr($"{objType}: [Save] not compatible with Type: {p.PropertyType} of member {p.Name}");
+			}
+			foreach(var f in incompFields){
+				GD.PrintErr($"{objType}: [Save] not compatible with Type: {f.FieldType} of member {f.Name}");
+			}
+			
+			return null;
+		}
+		
 
 		// Calc sum byte size of all [Save] members
 		int byteSize = 0;
@@ -47,9 +65,10 @@ struct SaveObject
 
 		// Debug print
 		//GD.Print($"\n{objType}");
-		//properties.All(prop => {GD.Print(prop.Name ); return true;});
-		//fields.All(field =>    {GD.Print(field.Name); return true;});
-	
+		//properties.All(prop => {GD.Print(prop.PropertyType ); return true;});
+		//fields.All(field =>    {GD.Print(field.FieldType); return true;});
+
+
 		return new SaveObject()
 		{
 			Obj        = obj,

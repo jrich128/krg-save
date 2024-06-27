@@ -6,6 +6,10 @@ using System.Reflection;
 using System.Collections.Generic;
 using System.Runtime.InteropServices;
 
+/*
+	TODO: Replace the binary parsing code with using 
+	MemoryStream & BinaryWrite / Read 
+*/
 
 public enum GameStatus
 {
@@ -13,7 +17,7 @@ public enum GameStatus
 	Loaded
 }
 
-
+[GlobalClass]
 public partial class Game : Node
 {	
 	[Signal] public delegate void SaveLoadedEventHandler(string saveName);
@@ -30,9 +34,9 @@ public partial class Game : Node
 	List<SaveObject> _saveList = new List<SaveObject>();
 	int _saveSize;
 
-	
-	static Game()
-	{ 	
+
+	public override void _Ready()
+	{	
 		// Check for save dir, make if none
 		if(!DirAccess.DirExistsAbsolute(_saveDir)){
 			var err = Godot.DirAccess.MakeDirAbsolute(_saveDir);
@@ -41,10 +45,7 @@ public partial class Game : Node
 				return;
 			}
 		}
-	}
 
-	public override void _Ready()
-	{	
 		CreateSaveObjects(this, this);
 	}
 
@@ -100,24 +101,25 @@ public partial class Game : Node
 				var prop = _saveList[i].Properties[j];
 				var value = prop.GetValue(_saveList[i].Obj);
 				
+
 				switch(value)
 				{
-					case Variant:
-					//prop.SetValue(obj, v);
-					GD.Print("Used a variant... is this okay?");
-					break;
-
 					case int:
-					int v = BitConverter.ToInt32(file, byteOffset);
-					prop.SetValue(obj, v);
-					byteOffset += 4;
+					prop.SetValue(obj, BitConverter.ToInt32(file, byteOffset));
+					byteOffset += sizeof(int);
 					break;
 
 					case float:
+					prop.SetValue(obj, BitConverter.ToSingle(file, byteOffset));
+					byteOffset += sizeof(float);
 					break;
 
-					case double:
+					case double:				
+					prop.SetValue(obj, BitConverter.ToDouble(file, byteOffset));
+					byteOffset += sizeof(double);
 					break;
+
+
 
 					default:
 					GD.PrintErr($"Property type not supported: {prop.PropertyType}");
