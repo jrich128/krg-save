@@ -51,12 +51,11 @@ struct SaveObject
 				GD.PrintErr($"{objType}: [Save] not compatible with Type: {p.PropertyType} of member {p.Name}");
 			}
 			foreach(var f in incompFields){
-				GD.PrintErr($"{objType}: [Save] not compatible with Type: {f.FieldType} of member {f.Name}");
+				GD.PrintErr($"Class {objType}: [Save] not compatible with Type: {f.FieldType} of member {f.Name}");
 			}
 			
 			return null;
 		}
-		
 
 		// Calc sum byte size of all [Save] members
 		int byteSize = 0;
@@ -64,10 +63,9 @@ struct SaveObject
 		fields.All(field    => {byteSize += Marshal.SizeOf(field.FieldType  ); return true;});
 
 		// Debug print
-		//GD.Print($"\n{objType}");
-		//properties.All(prop => {GD.Print(prop.PropertyType ); return true;});
-		//fields.All(field =>    {GD.Print(field.FieldType); return true;});
-
+		GD.Print($"\n{objType}");
+		properties.All(prop => {GD.Print(prop.PropertyType ); return true;});
+		fields.All(field =>    {GD.Print(field.FieldType); return true;});
 
 		return new SaveObject()
 		{
